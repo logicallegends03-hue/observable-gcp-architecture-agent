@@ -4,23 +4,26 @@ from typing import Dict, List, Any, Tuple
 from google import genai
 from google.genai import types
 
+# ── Module-level client singleton ─────────────────────────────────────────────
+# Avoid re-initialising on every call; the client is stateless and thread-safe.
+_CLIENT: genai.Client | None = None
+
 def get_client() -> genai.Client:
     """
-    Initializes and returns the Google Gen AI client configured for Vertex AI.
+    Returns a cached Gemini/Vertex AI client, creating it only on first call.
     """
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-    use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() == "true"
-    
-    # If using Vertex AI, the google-genai SDK needs project and location.
-    # Vertex AI requires Application Default Credentials (ADC).
-    return genai.Client(vertexai=use_vertex, project=project, location=location)
+    global _CLIENT
+    if _CLIENT is None:
+        project = os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() == "true"
+        _CLIENT = genai.Client(vertexai=use_vertex, project=project, location=location)
+    return _CLIENT
 
 def generate_architecture(
     requirement: str,
     constraints: List[str],
     services: List[Dict[str, Any]],
-    scores: List[Dict[str, Any]],
     bill_of_materials: List[Dict[str, Any]],
     tradeoffs: List[str]
 ) -> Tuple[str, bool, float]:
@@ -30,65 +33,90 @@ def generate_architecture(
     Returns (explanation_markdown, fallback_used, gemini_latency_ms).
     """
     start_time = time.perf_counter()
-    
+
     # Format inputs for prompt
     service_names = [s["name"] for s in services]
-    score_summaries = [f"{s['name']}: Score={s['score']}, Tier={s['cost_tier']}" for s in scores]
-    bom_summaries = [f"{item['service']}: {item['description']} ({item['price']})" for item in bill_of_materials]
-    
-    prompt = f"""
-You are a senior GCP cloud architect and agentic AI solution designer.
-Generate a practical architecture recommendation using only the selected services unless giving alternatives.
+    score_summaries = "\n".join(
+        f"  • {s['name']}: score={s['score']}, cost_tier={s['cost_tier']}, category={s['category']}"
+        for s in services
+    )
+    bom_summaries = "\n".join(
+        f"  • {item['service']}: {item['description']} → {item['price']}"
+        for item in bill_of_materials
+    )
+    constraint_str = ", ".join(constraints) if constraints else "none"
+    tradeoff_str = "\n".join(f"  ⚠ {t}" for t in tradeoffs) if tradeoffs else "  • No critical tradeoffs detected."
 
-Input Cloud Requirement:
+    prompt = f"""You are a senior GCP cloud architect embedded in an agentic AI optimisation platform.
+A scoring engine has already ranked services against the user's constraints — your job is to turn those results into a compelling, concrete architectural proposal.
+
+## User Requirement
 "{requirement}"
 
-Detected/Selected Constraints:
-{constraints}
+## Active Constraints
+{constraint_str}
 
-Recommended Services (Top 8):
-{service_names}
-
-Detailed Score Table:
+## Scoring Engine — Top Recommendations
 {score_summaries}
 
-Bill of Materials:
+## Bill of Materials
 {bom_summaries}
 
-Tradeoff / Impact Assessment warnings:
-{tradeoffs}
+## Tradeoff / Risk Assessment
+{tradeoff_str}
 
-Generate a beautiful, professional, and highly detailed markdown architectural proposal.
-You MUST structure your response with the following exact section headers:
-1. Recommended Architecture
-2. Why the services fit
-3. Constraint-to-service mapping
-4. Impact Assessment
-5. Cost Efficiency View
-6. Scalability View
-7. Performance View
-8. Observability Plan
-9. RAG / External API Extension
-10. Cloud Run Deployment Suggestion
-11. Future Roadmap
+---
+Write a professional, markdown-formatted architectural proposal with these EXACT sections (use ## headers):
 
-Provide concrete recommendations. Keep the text engaging and clean. Avoid vague generalizations.
+## 1. Recommended Architecture
+(Describe the overall topology in 3-5 sentences. Include a short ASCII diagram showing the main data-flow.)
+
+## 2. Why These Services Fit
+(One bullet per service explaining WHY the score reflects the requirement.)
+
+## 3. Constraint-to-Service Mapping
+(Table: Constraint | Serving Service | Rationale)
+
+## 4. Impact Assessment
+(Address each tradeoff warning and how to mitigate it.)
+
+## 5. Cost Efficiency View
+(Concrete monthly estimate using BOM prices. Identify the top cost driver and how to reduce it.)
+
+## 6. Scalability View
+(Explain how the architecture scales at 10×, 100× load. Name specific GCP autoscaling mechanisms.)
+
+## 7. Performance View
+(Expected p99 latency per tier. Identify and fix the slowest hop.)
+
+## 8. Observability Plan
+(Logging → Monitoring → Tracing → Alerting pipeline. Which Cloud Ops services and what dashboards/alerts to create.)
+
+## 9. RAG / External API Extension
+(If rag_required or external_api_required constraints are active, give a concrete integration pattern; otherwise briefly note how it could be added.)
+
+## 10. Cloud Run Deployment
+(Provide a ready-to-run `gcloud` snippet to build and deploy the main service.)
+
+## 11. Future Roadmap
+(3 numbered next steps with estimated effort: Easy / Medium / Hard.)
+
+Rules: be specific — cite service names, config values, and real GCP pricing where possible. No vague filler.
 """
 
     try:
-        # Check if project environment variable is present; if not, raise so we fallback immediately 
-        # (to prevent slow CLI timeouts for users running without GCP configured).
+        # Fail fast if project is unset — avoids SDK timeout hanging the UI
         if not os.getenv("GOOGLE_CLOUD_PROJECT") and os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "true").lower() == "true":
-            raise ValueError("GOOGLE_CLOUD_PROJECT is not set. Falling back to local architecture template.")
-            
+            raise ValueError("GOOGLE_CLOUD_PROJECT not set — using local fallback.")
+
         client = get_client()
-        
+
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.2,
-                max_output_tokens=2500
+                max_output_tokens=4096   # was 2500 — enough for all 11 sections
             )
         )
         

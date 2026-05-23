@@ -4,6 +4,9 @@ from typing import Dict, List, Any
 
 BASE_DIR = Path(__file__).resolve().parent
 
+# ── Module-level cache: read services.json once per process ──────────────────
+_SERVICES_CACHE: Dict[str, Any] | None = None
+
 BOOSTS = {
     "cost_efficient": ["Cloud Run", "Cloud Functions", "BigQuery", "Cloud SQL PostgreSQL", "Cloud Storage", "App Engine Standard"],
     "scalable": ["GKE Autopilot", "Cloud Spanner", "Firestore", "Pub/Sub", "Cloud Load Balancing", "Dataflow"],
@@ -21,9 +24,12 @@ BOOSTS = {
 }
 
 def load_services() -> Dict[str, Any]:
-    json_path = BASE_DIR / "services.json"
-    with open(json_path, "r") as f:
-        return json.load(f)
+    global _SERVICES_CACHE
+    if _SERVICES_CACHE is None:
+        json_path = BASE_DIR / "services.json"
+        with open(json_path, "r") as f:
+            _SERVICES_CACHE = json.load(f)
+    return _SERVICES_CACHE
 
 def score_services(constraints: List[str], budget_preference: str = "medium") -> List[Dict[str, Any]]:
     """

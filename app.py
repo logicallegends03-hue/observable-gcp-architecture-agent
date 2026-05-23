@@ -104,12 +104,15 @@ budget_pref = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Environment Info")
-st.sidebar.code(f"""
-GOOGLE_GENAI_USE_VERTEXAI={st.sidebar.text_input("Use Vertex AI", "true", disabled=True)}
-GOOGLE_CLOUD_PROJECT={st.sidebar.text_input("GCP Project", "your-gcp-project")}
-GOOGLE_CLOUD_LOCATION=us-central1
-Model: gemini-2.5-flash
-""", language="ini")
+gcp_project = st.sidebar.text_input("GCP Project ID", placeholder="your-gcp-project",
+                                     help="Set GOOGLE_CLOUD_PROJECT env var or enter here for display.")
+st.sidebar.code(
+    f"GOOGLE_GENAI_USE_VERTEXAI=true\n"
+    f"GOOGLE_CLOUD_PROJECT={gcp_project or 'your-gcp-project'}\n"
+    "GOOGLE_CLOUD_LOCATION=us-central1\n"
+    "Model: gemini-2.5-flash",
+    language="ini"
+)
 
 st.sidebar.info(
     "💡 This agent operates with active fallback logic. If Vertex AI credentials or project config are not provided, "
@@ -144,8 +147,8 @@ selected_constraints = st.multiselect(
 # Run generation trigger button
 generate_button = st.button("🚀 Generate Recommendation & Architecture", type="primary", use_container_width=True)
 
-# Process recommendations
-if generate_button or st.session_state.run_executed or (requirement_input == DEFAULT_PROMPT and not st.session_state.run_executed):
+# Process recommendations — run on first load (default prompt) or whenever button is clicked
+if generate_button or not st.session_state.run_executed:
     st.session_state.run_executed = True
     
     # Start timer for observability
@@ -169,7 +172,6 @@ if generate_button or st.session_state.run_executed or (requirement_input == DEF
         requirement=requirement_input,
         constraints=selected_constraints,
         services=recommended_services,
-        scores=recommended_services,
         bill_of_materials=bom,
         tradeoffs=tradeoffs
     )
