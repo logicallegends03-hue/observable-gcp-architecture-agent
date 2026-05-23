@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 BASE_DIR = Path(__file__).resolve().parent
 
 # ── Module-level cache: read services.json once per process ──────────────────
-_SERVICES_CACHE: Dict[str, Any] | None = None
+_SERVICES_CACHE: Optional[Dict[str, Any]] = None
 
 BOOSTS = {
     "cost_efficient": ["Cloud Run", "Cloud Functions", "BigQuery", "Cloud SQL PostgreSQL", "Cloud Storage", "App Engine Standard"],

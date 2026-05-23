@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Observable Agentic AI GCP Architecture Optimizer",
     page_icon="☁️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # 2. Premium Design Theme Custom CSS
@@ -20,7 +20,6 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
-/* Set main fonts */
 html, body, [data-testid="stAppViewContainer"], .stApp {
     font-family: 'Outfit', sans-serif;
 }
@@ -29,7 +28,6 @@ code, pre, .mono-text {
     font-family: 'JetBrains Mono', monospace !important;
 }
 
-/* Headers styling */
 h1, h2, h3, h4, h5, h6 {
     font-family: 'Outfit', sans-serif;
     font-weight: 700 !important;
@@ -50,7 +48,6 @@ h1, h2, h3, h4, h5, h6 {
     margin-bottom: 2rem;
 }
 
-/* Card layout wrapper */
 .custom-card {
     background-color: #0d1117;
     border: 1px solid #30363d;
@@ -59,13 +56,10 @@ h1, h2, h3, h4, h5, h6 {
     margin-bottom: 20px;
 }
 
-/* Sidebar styling */
-[data-testid="stSidebar"] {
-    background-color: #0d1117;
-    border-right: 1px solid #30363d;
-}
+/* Hide sidebar and toggle button entirely */
+[data-testid="stSidebar"]      { display: none; }
+[data-testid="collapsedControl"] { display: none; }
 
-/* Highlight tags */
 .constraint-tag {
     background-color: #1f6feb22;
     color: #58a6ff;
@@ -77,53 +71,27 @@ h1, h2, h3, h4, h5, h6 {
     display: inline-block;
     margin: 4px;
 }
+
+/* Solution plan radio pills */
+div[data-testid="stRadio"] label {
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# 3. Session State Initialization
-if "last_requirement" not in st.session_state:
-    st.session_state.last_requirement = ""
-if "selected_constraints" not in st.session_state:
-    st.session_state.selected_constraints = []
+# 3. Session State
 if "run_executed" not in st.session_state:
     st.session_state.run_executed = False
 
 # Default starter prompt
 DEFAULT_PROMPT = "Need low-cost, scalable, event-driven banking API with PostgreSQL, analytics, RAG and external APIs."
 
-# 4. Sidebar Controls Configuration
-st.sidebar.image("https://www.gstatic.com/images/branding/product/2x/cloud_logo_64dp.png", width=50)
-st.sidebar.markdown("### Agent Configuration")
-
-budget_pref = st.sidebar.selectbox(
-    "Budget Preference",
-    options=["low", "medium", "high"],
-    index=0,  # Default to low as in user prompt
-    help="Determines the starting scoring weights for cost vs performance/scalability."
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Environment Info")
-gcp_project = st.sidebar.text_input("GCP Project ID", placeholder="your-gcp-project",
-                                     help="Set GOOGLE_CLOUD_PROJECT env var or enter here for display.")
-st.sidebar.code(
-    f"GOOGLE_GENAI_USE_VERTEXAI=true\n"
-    f"GOOGLE_CLOUD_PROJECT={gcp_project or 'your-gcp-project'}\n"
-    "GOOGLE_CLOUD_LOCATION=us-central1\n"
-    "Model: gemini-2.5-flash",
-    language="ini"
-)
-
-st.sidebar.info(
-    "💡 This agent operates with active fallback logic. If Vertex AI credentials or project config are not provided, "
-    "it will run the recommendation engine and generate a deterministic fallback architecture report."
-)
-
-# 5. Main UI Layout
+# 4. Main UI Layout
 st.markdown('<div class="title-header">Observable Agentic AI GCP Architecture Optimizer</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle-header">Hackathon Goal: Create an Observable Agentic AI Platform for GCP Architecture Optimization</div>', unsafe_allow_html=True)
 
-# Requirement input text area
+# Requirement input
 requirement_input = st.text_area(
     "Describe your cloud system requirements",
     value=DEFAULT_PROMPT,
@@ -131,58 +99,48 @@ requirement_input = st.text_area(
     help="Type in your functional and non-functional requirements (e.g. databases, throughput, cost boundaries)."
 )
 
-# Dynamic constraint detection trigger
-if requirement_input != st.session_state.last_requirement:
-    st.session_state.last_requirement = requirement_input
-    st.session_state.selected_constraints = constraint_detector.detect_constraints(requirement_input)
-
-# Allow manual additions/removals of constraints
-selected_constraints = st.multiselect(
-    "Detected Constraints (Modify or manually append)",
-    options=constraint_detector.ALL_CONSTRAINTS,
-    default=st.session_state.selected_constraints,
-    key="constraints_multiselect"
-)
-
-# Run generation trigger button
+# Run button
 generate_button = st.button("🚀 Generate Recommendation & Architecture", type="primary", use_container_width=True)
 
-# Process recommendations — run on first load (default prompt) or whenever button is clicked
+# ── Main processing block ─────────────────────────────────────────────────────
 if generate_button or not st.session_state.run_executed:
     st.session_state.run_executed = True
-    
-    # Start timer for observability
+
     overall_start = observability.start_timer()
-    
-    # 1. Scorer recommendation list
-    recommended_services = scorer.score_services(selected_constraints, budget_preference=budget_pref)
-    recommended_names = [s["name"] for s in recommended_services]
-    
-    # 2. Get tradeoffs / warnings
-    tradeoffs = scorer.generate_tradeoffs(recommended_names)
-    
-    # 3. Get in-memory knowledge graph relationships
+
+    # Auto-detect constraints silently from the requirement text
+    auto_constraints = constraint_detector.detect_constraints(requirement_input)
+
+    # Score services for all 3 solution profiles
+    cost_services = scorer.score_services(auto_constraints, budget_preference="low")
+    perf_services = scorer.score_services(auto_constraints, budget_preference="high")
+    poc_services  = scorer.score_services(auto_constraints, budget_preference="medium")
+
+    # Use cost_services as reference for BOM, graph, and metrics
+    recommended_services = cost_services
+    recommended_names    = [s["name"] for s in recommended_services]
+
+    # Tradeoffs, graph, BOM
+    tradeoffs     = scorer.generate_tradeoffs(recommended_names)
     relationships = knowledge_graph.get_relationships(recommended_names)
-    
-    # 4. Simulated Bill of Materials (BOM) & Overall cost tier
     cost_tier, bom = cost_estimator.estimate_cost(recommended_names)
-    
-    # 5. Generate explanation from Gemini (or fallback template)
-    explanation_text, fallback_used, gemini_latency = gemini_agent.generate_architecture(
+
+    # Generate 3 architecture solutions
+    solutions, fallback_used, gemini_latency, gemini_error = gemini_agent.generate_architecture(
         requirement=requirement_input,
-        constraints=selected_constraints,
-        services=recommended_services,
+        constraints=auto_constraints,
+        cost_services=cost_services,
+        perf_services=perf_services,
+        poc_services=poc_services,
         bill_of_materials=bom,
         tradeoffs=tradeoffs
     )
-    
-    # Stop overall timer
+
     total_time_ms = observability.end_timer(overall_start)
-    
-    # Build and log metrics
+
     metrics = observability.build_observability_metrics(
         total_time_ms=total_time_ms,
-        constraints_count=len(selected_constraints),
+        constraints_count=len(auto_constraints),
         services_count=len(recommended_services),
         tradeoffs_count=len(tradeoffs),
         cost_tier=cost_tier,
@@ -190,125 +148,134 @@ if generate_button or not st.session_state.run_executed:
         gemini_latency_ms=gemini_latency,
         edges_count=len(relationships)
     )
-    
-    # 6. Top Metrics Bar Display
+
+    # ── Metrics bar ───────────────────────────────────────────────────────────
     st.markdown("---")
     m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
-    
     with m_col1:
-        st.metric(label="Overall Cost Tier", value=cost_tier)
+        st.metric(label="Overall Cost Tier",      value=cost_tier)
     with m_col2:
-        st.metric(label="Execution Time", value=f"{total_time_ms:.1f} ms")
+        st.metric(label="Execution Time",          value=f"{total_time_ms:.1f} ms")
     with m_col3:
-        st.metric(label="Constraints Detected", value=len(selected_constraints))
+        st.metric(label="Constraints Detected",    value=len(auto_constraints))
     with m_col4:
-        st.metric(label="Recommended Services", value=len(recommended_services))
+        st.metric(label="Recommended Services",    value=len(recommended_services))
     with m_col5:
         mode_val = "Rule-based Fallback" if fallback_used else "Gemini (Vertex AI)"
-        st.metric(label="Generation Mode", value=mode_val)
-        
+        st.metric(label="Generation Mode",         value=mode_val)
+
     st.markdown("---")
-    
-    # 7. Tabbed Dashboard Layout
+
+    # ── Tabs ──────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4 = st.tabs([
         "📋 AI Architecture Recommendation",
         "📊 Score Table & Tradeoffs",
         "🕸️ Service Knowledge Graph",
         "🔬 Observability & Telemetry"
     ])
-    
-    # TAB 1: AI Recommendation
+
+    # ── TAB 1: 3 Architecture Plans ───────────────────────────────────────────
     with tab1:
-        # If fallback was used, show a nice warning alert
         if fallback_used:
             st.warning(
                 "⚠️ **Observability Note**: Vertex AI credentials were not detected. "
                 "Serving a structured deterministic architectural proposal compiled from local knowledge rules."
             )
+            if gemini_error:
+                st.error(f"🔍 **Debug — actual error:** `{gemini_error}`")
         else:
-            st.success("✨ **Success**: Architecture recommendation successfully synthesized via Gemini 2.5 Flash on Vertex AI.")
-            
-        # Display Gemini / Fallback text
-        st.markdown(explanation_text)
-        
-    # TAB 2: Service Comparison & Scores
+            st.success("✨ **Success**: Architecture recommendations synthesized via Gemini 2.5 Flash on Vertex AI.")
+
+        st.markdown("### Choose an Architecture Plan")
+
+        plan = st.radio(
+            "plan",
+            options=["💰 Cost Efficient", "⚡ High Performance", "🧪 POC / Low Resource"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+        st.markdown("---")
+
+        if plan == "💰 Cost Efficient":
+            st.markdown(solutions["cost"])
+        elif plan == "⚡ High Performance":
+            st.markdown(solutions["performance"])
+        else:
+            st.markdown(solutions["poc"])
+
+    # ── TAB 2: Score Table & Tradeoffs ────────────────────────────────────────
     with tab2:
         st.subheader("Weighted Scoring Engine Analysis")
         st.markdown(
             "This table shows how GCP services were scored based on active constraints and budget preferences. "
             "Higher scores denote better alignment with your requirements."
         )
-        
-        # Convert scored recommendations to DataFrame for rendering
+
         df_scores = pd.DataFrame([
             {
-                "GCP Service": s["name"],
-                "Category": s["category"],
+                "GCP Service":         s["name"],
+                "Category":            s["category"],
                 "Compatibility Score": s["score"],
-                "Cost Tier": s["cost_tier"],
-                "BOM Unit": s["bom_unit"],
-                "Description": s["description"]
+                "Cost Tier":           s["cost_tier"],
+                "BOM Unit":            s["bom_unit"],
+                "Description":         s["description"]
             } for s in recommended_services
         ])
-        
         st.dataframe(df_scores, use_container_width=True, hide_index=True)
-        
-        # Tradeoffs / Impact Warnings Section
+
         st.subheader("Architectural Tradeoffs & Warnings")
         if tradeoffs:
             for t in tradeoffs:
                 st.warning(t)
         else:
             st.info("No critical architectural tradeoffs triggered for this service set.")
-            
-        # Simulated Bill of Materials
+
         st.subheader("Simulated Bill of Materials")
         df_bom = pd.DataFrame(bom)
         df_bom.columns = ["Service Name", "Sizing / Usage Description", "Individual Cost Tier", "Estimated Cost"]
         st.table(df_bom)
-        
-    # TAB 3: Knowledge Graph
+
+    # ── TAB 3: Knowledge Graph ────────────────────────────────────────────────
     with tab3:
         st.subheader("Service Relationship Knowledge Graph")
         st.markdown(
             "Visualizing connections and integration mechanisms between the recommended services in your architecture."
         )
-        
+
         if relationships:
             dot_str = knowledge_graph.generate_dot_format(relationships)
             st.graphviz_chart(dot_str)
-            
-            # Print relationships in clean list format
+
             st.markdown("### Integration Details")
             for src, rel, tgt in relationships:
                 st.markdown(f"- **{src}** *{rel.replace('_', ' ')}* ➡️ **{tgt}**")
         else:
             st.info("No standard integrated relationships found in the graph for the current recommended service set.")
-            
-    # TAB 4: Observability & Telemetry
+
+    # ── TAB 4: Observability & Telemetry ──────────────────────────────────────
     with tab4:
         st.subheader("Agent Telemetry & Observability Metrics")
         st.markdown(
             "Full execution details and performance metrics captured for this architecture optimization request. "
             "These metrics are logged in real-time as structured JSON logs."
         )
-        
+
         col_tel1, col_tel2 = st.columns([2, 3])
-        
         with col_tel1:
             st.markdown("#### Key Latencies")
-            st.metric("Total App Time", f"{total_time_ms:.2f} ms")
-            st.metric("Gemini API Time", f"{gemini_latency:.2f} ms")
-            st.metric("Knowledge Graph Edges", len(relationships))
-            
+            st.metric("Total App Time",        f"{total_time_ms:.2f} ms")
+            st.metric("Gemini API Time",        f"{gemini_latency:.2f} ms")
+            st.metric("Knowledge Graph Edges",  len(relationships))
+
         with col_tel2:
             st.markdown("#### Structured JSON Log Payload")
             st.json(metrics)
-            
+
         st.subheader("Structured Log Stream Simulator")
         st.code(f"""
 INFO:gcp-architecture-agent-observability: {{"event": "agent_execution_metrics", "metrics": {metrics}}}
-INFO:gcp-architecture-agent-observability: Constraint detection completed in {total_time_ms * 0.15:.1f} ms. Detected: {selected_constraints}
+INFO:gcp-architecture-agent-observability: Constraint detection completed in {total_time_ms * 0.15:.1f} ms. Detected: {auto_constraints}
 INFO:gcp-architecture-agent-observability: Scored {len(recommended_services)} services. Top recommendation: {recommended_names[0] if recommended_names else 'None'}
 INFO:gcp-architecture-agent-observability: Knowledge graph generated with {len(relationships)} edges.
 INFO:gcp-architecture-agent-observability: {"Fallback template invoked." if fallback_used else "Gemini content successfully fetched."}
